@@ -61,9 +61,6 @@ Before running this project, make sure you have the following installed:
    # Development
    npm run dev
    
-   # Production
-   npm start
-   ```
 
 The API will be available at `http://localhost:5000`
 
