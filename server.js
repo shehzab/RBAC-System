@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const redisLimiter = require('./middleware/redisRateLimit');
 
 // Load env vars
 dotenv.config();
@@ -26,6 +27,7 @@ app.use(express.json());
 
 // Enable CORS
 app.use(cors());
+app.use(redisLimiter);
 
 // Mount routers
 app.use('/api/auth', authRoutes);
