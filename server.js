@@ -4,6 +4,8 @@ const dotenv = require('dotenv');
 const redisLimiter = require('./middleware/redisRateLimit');
 const requestLogger = require('./middleware/requestLogger');
 const auditLogger = require('./middleware/auditLogger');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpec = require('./config/swagger');
 
 // Load env vars
 dotenv.config();
@@ -44,6 +46,8 @@ app.use(errorHandler);
 
 app.use(requestLogger);
 app.use(auditLogger);
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
 
 const PORT = process.env.PORT || 5000;
 
