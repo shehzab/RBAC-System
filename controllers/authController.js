@@ -1,7 +1,15 @@
 const User = require('../models/User');
 const Role = require('../models/Role');
-const generateToken = require('../utils/generateToken');
+const { generateToken, verifyToken } = require('../utils/generateToken');
 const apiResponse = require('../utils/apiResponse');
+
+// Helper function to calculate refresh token expiry
+const getRefreshTokenExpiry = () => {
+  const expiresInDays = parseInt(process.env.REFRESH_TOKEN_EXPIRY_DAYS) || 7;
+  const expiryDate = new Date();
+  expiryDate.setDate(expiryDate.getDate() + expiresInDays);
+  return expiryDate;
+};
 
 // Register user
 const register = async (req, res) => {
@@ -27,12 +35,18 @@ const register = async (req, res) => {
       roleId: defaultRole._id
     });
     
-    // Generate token
-    const token = generateToken({ id: user._id });
+    // Generate tokens
+    const accessToken = generateToken({ id: user._id });
+    const refreshToken = generateToken({ id: user._id }, true);
+    const refreshTokenExpiry = getRefreshTokenExpiry();
+    
+    // Save refresh token
+    await user.addRefreshToken(refreshToken, refreshTokenExpiry);
     
     // Return response
     return apiResponse.success(res, {
-      token,
+      accessToken,
+      refreshToken,
       user: {
         id: user._id,
         email: user.email,
@@ -40,6 +54,7 @@ const register = async (req, res) => {
       }
     }, 'User registered successfully', 201);
   } catch (error) {
+    console.error('Registration error:', error);
     return apiResponse.error(res, 'Server Error', 500);
   }
 };
@@ -61,12 +76,18 @@ const login = async (req, res) => {
       return apiResponse.error(res, 'Invalid credentials', 401);
     }
     
-    // Generate token
-    const token = generateToken({ id: user._id });
+    // Generate tokens
+    const accessToken = generateToken({ id: user._id });
+    const refreshToken = generateToken({ id: user._id }, true);
+    const refreshTokenExpiry = getRefreshTokenExpiry();
+    
+    // Save refresh token
+    await user.addRefreshToken(refreshToken, refreshTokenExpiry);
     
     // Return response
     return apiResponse.success(res, {
-      token,
+      accessToken,
+      refreshToken,
       user: {
         id: user._id,
         email: user.email,
@@ -74,9 +95,108 @@ const login = async (req, res) => {
       }
     }, 'Login successful');
   } catch (error) {
+    console.error('Login error:', error);
     return apiResponse.error(res, 'Server Error', 500);
   }
 };
+
+// Refresh token
+const refreshToken = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    
+    if (!refreshToken) {
+      return apiResponse.error(res, 'Refresh token is required', 400);
+    }
+    
+    // Verify refresh token
+    let decoded;
+    try {
+      decoded = verifyToken(refreshToken, true);
+    } catch (error) {
+      return apiResponse.error(res, 'Invalid refresh token', 401);
+    }
+    
+    // Find user
+    const user = await User.findById(decoded.id).populate('roleId');
+    if (!user) {
+      return apiResponse.error(res, 'User not found', 404);
+    }
+    
+    // Check if refresh token is valid
+    if (!user.isValidRefreshToken(refreshToken)) {
+      return apiResponse.error(res, 'Refresh token expired or invalid', 401);
+    }
+    
+    // Generate new tokens
+    const newAccessToken = generateToken({ id: user._id });
+    const newRefreshToken = generateToken({ id: user._id }, true);
+    const refreshTokenExpiry = getRefreshTokenExpiry();
+    
+    // Replace old refresh token with new one
+    await user.removeRefreshToken(refreshToken);
+    await user.addRefreshToken(newRefreshToken, refreshTokenExpiry);
+    
+    // Return response
+    return apiResponse.success(res, {
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+      user: {
+        id: user._id,
+        email: user.email,
+        role: user.roleId.name
+      }
+    }, 'Token refreshed successfully');
+  } catch (error) {
+    console.error('Refresh token error:', error);
+    return apiResponse.error(res, 'Server Error', 500);
+  }
+};
+
+// Logout
+const logout = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    
+    if (!refreshToken) {
+      return apiResponse.error(res, 'Refresh token is required', 400);
+    }
+    
+    // Find user by refresh token
+    const user = await User.findOne({
+      'refreshTokens.token': refreshToken
+    });
+    
+    if (user) {
+      // Remove the refresh token
+      await user.removeRefreshToken(refreshToken);
+    }
+    
+    return apiResponse.success(res, null, 'Logged out successfully');
+  } catch (error) {
+    console.error('Logout error:', error);
+    return apiResponse.error(res, 'Server Error', 500);
+  }
+};
+
+// Logout all devices
+const logoutAll = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    
+    if (user) {
+      // Clear all refresh tokens
+      user.refreshTokens = [];
+      await user.save();
+    }
+    
+    return apiResponse.success(res, null, 'Logged out from all devices successfully');
+  } catch (error) {
+    console.error('Logout all error:', error);
+    return apiResponse.error(res, 'Server Error', 500);
+  }
+};
+
 
 // Forgot password (simplified version)
 const forgotPassword = async (req, res) => {
@@ -89,7 +209,7 @@ const forgotPassword = async (req, res) => {
       return apiResponse.error(res, 'User not found', 404);
     }
     
-    // In a real application, you would generate a reset token, 
+    // In a real application, generate a reset token, 
     // send an email, and handle the reset process
     // For simplicity, we'll just return a success message
     
@@ -104,7 +224,7 @@ const resetPassword = async (req, res) => {
   try {
     const { token, newPassword } = req.body;
     
-    // In a real application, you would verify the reset token
+    // In a real application, verify the reset token
     // and update the password accordingly
     // For simplicity, we'll just return a success message
     
@@ -117,6 +237,9 @@ const resetPassword = async (req, res) => {
 module.exports = {
   register,
   login,
+  refreshToken,
+  logout,
+  logoutAll,
   forgotPassword,
   resetPassword
 };

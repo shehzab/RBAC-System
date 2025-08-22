@@ -20,6 +20,10 @@ const resetPasswordSchema = Joi.object({
   newPassword: Joi.string().min(6).required()
 });
 
+const refreshTokenSchema = Joi.object({
+  refreshToken: Joi.string().required()
+});
+
 // User schemas
 const updateProfileSchema = Joi.object({
   email: Joi.string().email().optional(),
@@ -58,5 +62,6 @@ module.exports = {
   roleSchema,
   permissionSchema,
   assignRoleSchema,
-  assignPermissionSchema
+  assignPermissionSchema,
+  refreshTokenSchema
 };

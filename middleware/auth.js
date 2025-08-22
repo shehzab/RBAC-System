@@ -1,4 +1,4 @@
-const jwt = require('jsonwebtoken');
+const { verifyToken } = require('../utils/generateToken');
 const User = require('../models/User');
 const apiResponse = require('../utils/apiResponse');
 
@@ -15,7 +15,7 @@ const authenticate = async (req, res, next) => {
     }
     
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = verifyToken(token);
       const user = await User.findById(decoded.id).populate('roleId');
       
       if (!user) {
