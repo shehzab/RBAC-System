@@ -1,6 +1,7 @@
 const { verifyToken } = require('../utils/generateToken');
 const User = require('../models/User');
 const apiResponse = require('../utils/apiResponse');
+const logger = require('../utils/logger');
 
 const authenticate = async (req, res, next) => {
   try {
@@ -48,6 +49,7 @@ const authenticate = async (req, res, next) => {
       return apiResponse.error(res, 'Not authorized to access this route', 401);
     }
   } catch (error) {
+    logger.error(`Authentication error: ${error.message}`);
     return apiResponse.error(res, 'Server Error', 500);
   }
 };

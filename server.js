@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const redisLimiter = require('./middleware/redisRateLimit');
+const requestLogger = require('./middleware/requestLogger');
+const auditLogger = require('./middleware/auditLogger');
 
 // Load env vars
 dotenv.config();
@@ -16,6 +18,7 @@ const userRoutes = require('./routes/users');
 const roleRoutes = require('./routes/roles');
 const permissionRoutes = require('./routes/permissions');
 const adminRoutes = require('./routes/admin');
+
 
 // Middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -38,6 +41,9 @@ app.use('/api/admin', adminRoutes);
 
 // Error handler middleware
 app.use(errorHandler);
+
+app.use(requestLogger);
+app.use(auditLogger);
 
 const PORT = process.env.PORT || 5000;
 

@@ -1,6 +1,17 @@
 const apiResponse = require('../utils/apiResponse');
+const logger = require('../utils/logger');
 
 const errorHandler = (err, req, res, next) => {
+
+   logger.error({
+    message: err.message,
+    stack: err.stack,
+    url: req.originalUrl,
+    method: req.method,
+    ip: req.ip,
+    userId: req.user ? req.user._id : 'anonymous'
+  }); 
+
   let error = { ...err };
   error.message = err.message;
   
