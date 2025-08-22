@@ -24,13 +24,23 @@ const refreshTokenSchema = Joi.object({
   refreshToken: Joi.string().required()
 });
 
-// User schemas
+const verifyEmailSchema = Joi.object({
+  token: Joi.string().required(),
+  userId: Joi.string().required()
+});
+
+const resendVerificationSchema = Joi.object({
+  email: Joi.string().email().required()
+});
+
+
+
 const updateProfileSchema = Joi.object({
   email: Joi.string().email().optional(),
   password: Joi.string().min(6).optional()
 }).min(1);
 
-// Role schemas
+
 const roleSchema = Joi.object({
   name: Joi.string().required(),
   description: Joi.string().required()
@@ -44,7 +54,7 @@ const permissionSchema = Joi.object({
   description: Joi.string().required()
 });
 
-// Admin schemas
+
 const assignRoleSchema = Joi.object({
   roleId: objectId().required()
 });
@@ -63,5 +73,7 @@ module.exports = {
   permissionSchema,
   assignRoleSchema,
   assignPermissionSchema,
-  refreshTokenSchema
+  refreshTokenSchema,
+  verifyEmailSchema,
+  resendVerificationSchema
 };

@@ -6,7 +6,9 @@ const {
   logout,
   logoutAll,
   forgotPassword,
-  resetPassword
+  resetPassword,
+  verifyEmail,
+  resendVerificationEmail
 } = require('../controllers/authController');
 const validateRequest = require('../middleware/validation');
 const authenticate = require('../middleware/auth');
@@ -15,13 +17,14 @@ const {
   loginSchema,
   refreshTokenSchema,
   forgotPasswordSchema,
-  resetPasswordSchema
+  resetPasswordSchema,
+  verifyEmailSchema,
+  resendVerificationSchema
 } = require('../schemas');
 
 const router = express.Router();
 
-// Add refresh token schema to schemas/index.js
-// refreshTokenSchema = Joi.object({ refreshToken: Joi.string().required() })
+
 
 router.post('/register', validateRequest(registerSchema), register);
 router.post('/login', validateRequest(loginSchema), login);
@@ -30,5 +33,7 @@ router.post('/logout', validateRequest(refreshTokenSchema), logout);
 router.post('/logout-all', authenticate, logoutAll);
 router.post('/forgot-password', validateRequest(forgotPasswordSchema), forgotPassword);
 router.post('/reset-password', validateRequest(resetPasswordSchema), resetPassword);
+router.post('/verify-email', validateRequest(verifyEmailSchema), verifyEmail);
+router.post('/resend-verification', validateRequest(resendVerificationSchema), resendVerificationEmail);
 
 module.exports = router;

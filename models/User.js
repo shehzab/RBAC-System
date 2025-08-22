@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 const userSchema = new mongoose.Schema({
   email: {
@@ -19,6 +20,12 @@ const userSchema = new mongoose.Schema({
     ref: 'Role',
     required: true
   },
+  isEmailVerified: {
+    type: Boolean,
+    default: false
+  },
+  emailVerificationToken: String,
+  emailVerificationExpires: Date,
   refreshTokens: [{
     token: {
       type: String,
@@ -50,21 +57,37 @@ userSchema.pre('save', async function(next) {
   }
 });
 
+// Generate email verification token
+userSchema.methods.generateEmailVerificationToken = function() {
+  const token = crypto.randomBytes(32).toString('hex');
+  const expires = new Date();
+  expires.setHours(expires.getHours() + parseInt(process.env.EMAIL_VERIFICATION_EXPIRY_HOURS) || 24);
+  
+  this.emailVerificationToken = token;
+  this.emailVerificationExpires = expires;
+  
+  return this.save();
+};
 
-// Compare password method
+// Mark email as verified
+userSchema.methods.verifyEmail = function() {
+  this.isEmailVerified = true;
+  this.emailVerificationToken = undefined;
+  this.emailVerificationExpires = undefined;
+  return this.save();
+};
+
+// Compare entered password with stored hash
 userSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-//  Add method to add refresh token
+// Add refresh token and clean up expired ones
 userSchema.methods.addRefreshToken = function(token, expiresAt) {
-  // Remove expired tokens first
   this.refreshTokens = this.refreshTokens.filter(t => t.expiresAt > new Date());
-  
-  // Add new token
   this.refreshTokens.push({ token, expiresAt });
-  
-  // Keep only last 5 devices (optional security measure)
+
+  // Keep only last 5 tokens (limit devices)
   if (this.refreshTokens.length > 5) {
     this.refreshTokens = this.refreshTokens.slice(-5);
   }
@@ -72,17 +95,16 @@ userSchema.methods.addRefreshToken = function(token, expiresAt) {
   return this.save();
 };
 
-// Add method to remove refresh token
+// Remove specific refresh token
 userSchema.methods.removeRefreshToken = function(token) {
   this.refreshTokens = this.refreshTokens.filter(t => t.token !== token);
   return this.save();
 };
 
-// Add method to validate refresh token
+// Check if refresh token is valid
 userSchema.methods.isValidRefreshToken = function(token) {
   const tokenData = this.refreshTokens.find(t => t.token === token);
   return tokenData && tokenData.expiresAt > new Date();
 };
-
 
 module.exports = mongoose.model('User', userSchema);

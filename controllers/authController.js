@@ -1,5 +1,7 @@
+const crypto = require('crypto');
 const User = require('../models/User');
 const Role = require('../models/Role');
+const { sendVerificationEmail } = require('../utils/emailService');
 const { generateToken, verifyToken } = require('../utils/generateToken');
 const apiResponse = require('../utils/apiResponse');
 
@@ -11,80 +13,162 @@ const getRefreshTokenExpiry = () => {
   return expiryDate;
 };
 
-// Register user
+// Register user 
 const register = async (req, res) => {
   try {
     const { email, password } = req.body;
     
-    // Check if user already exists
     const userExists = await User.findOne({ email });
     if (userExists) {
       return apiResponse.error(res, 'User already exists', 400);
     }
     
-    // Get default role (user role)
     const defaultRole = await Role.findOne({ name: 'user' });
     if (!defaultRole) {
       return apiResponse.error(res, 'Default role not found', 500);
     }
-    
-    // Create user
+
     const user = await User.create({
       email,
       password,
-      roleId: defaultRole._id
+      roleId: defaultRole._id,
+      isEmailVerified: false
+    });
+
+    await user.generateEmailVerificationToken();
+    
+    try {
+      await sendVerificationEmail(user.email, user.emailVerificationToken, user._id);
+    } catch (emailError) {
+      console.error('Failed to send verification email:', emailError);
+    }
+
+    const accessToken = generateToken({ 
+      id: user._id, 
+      emailVerified: user.isEmailVerified,
+      role: 'unverified'
     });
     
-    // Generate tokens
-    const accessToken = generateToken({ id: user._id });
     const refreshToken = generateToken({ id: user._id }, true);
     const refreshTokenExpiry = getRefreshTokenExpiry();
     
-    // Save refresh token
     await user.addRefreshToken(refreshToken, refreshTokenExpiry);
     
-    // Return response
     return apiResponse.success(res, {
       accessToken,
       refreshToken,
       user: {
         id: user._id,
         email: user.email,
-        role: defaultRole.name
+        role: defaultRole.name,
+        isEmailVerified: user.isEmailVerified
       }
-    }, 'User registered successfully', 201);
+    }, 'User registered successfully. Please check your email for verification.', 201);
   } catch (error) {
     console.error('Registration error:', error);
     return apiResponse.error(res, 'Server Error', 500);
   }
 };
 
-// Login user
+const verifyEmail = async (req, res) => {
+  try {
+    const { token, userId } = req.body;
+    
+    if (!token || !userId) {
+      return apiResponse.error(res, 'Token and user ID are required', 400);
+    }
+    
+    const user = await User.findOne({
+      _id: userId,
+      emailVerificationToken: token,
+      emailVerificationExpires: { $gt: Date.now() }
+    });
+    
+    if (!user) {
+      return apiResponse.error(res, 'Invalid or expired verification token', 400);
+    }
+    
+    await user.verifyEmail();
+    
+    const accessToken = generateToken({ 
+      id: user._id, 
+      emailVerified: true 
+    });
+    
+    const refreshToken = generateToken({ id: user._id }, true);
+    const refreshTokenExpiry = getRefreshTokenExpiry();
+
+    await user.addRefreshToken(refreshToken, refreshTokenExpiry);
+    
+    return apiResponse.success(res, {
+      accessToken,
+      refreshToken,
+      user: {
+        id: user._id,
+        email: user.email,
+        role: user.roleId.name,
+        isEmailVerified: true
+      }
+    }, 'Email verified successfully');
+  } catch (error) {
+    console.error('Email verification error:', error);
+    return apiResponse.error(res, 'Server Error', 500);
+  }
+};
+
+const resendVerificationEmail = async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return apiResponse.error(res, 'Email is required', 400);
+    }
+    
+    const user = await User.findOne({ email });
+    
+    if (!user) {
+      return apiResponse.error(res, 'User not found', 404);
+    }
+    
+    if (user.isEmailVerified) {
+      return apiResponse.error(res, 'Email is already verified', 400);
+    }
+    
+    await user.generateEmailVerificationToken();
+
+    try {
+      await sendVerificationEmail(user.email, user.emailVerificationToken, user._id);
+      return apiResponse.success(res, null, 'Verification email sent successfully');
+    } catch (emailError) {
+      console.error('Failed to send verification email:', emailError);
+      return apiResponse.error(res, 'Failed to send verification email', 500);
+    }
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    return apiResponse.error(res, 'Server Error', 500);
+  }
+};
+
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
     
-    // Check if user exists
     const user = await User.findOne({ email }).populate('roleId');
     if (!user) {
       return apiResponse.error(res, 'Invalid credentials', 401);
     }
     
-    // Check password
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
       return apiResponse.error(res, 'Invalid credentials', 401);
     }
     
-    // Generate tokens
     const accessToken = generateToken({ id: user._id });
     const refreshToken = generateToken({ id: user._id }, true);
     const refreshTokenExpiry = getRefreshTokenExpiry();
     
-    // Save refresh token
     await user.addRefreshToken(refreshToken, refreshTokenExpiry);
     
-    // Return response
     return apiResponse.success(res, {
       accessToken,
       refreshToken,
@@ -100,7 +184,6 @@ const login = async (req, res) => {
   }
 };
 
-// Refresh token
 const refreshToken = async (req, res) => {
   try {
     const { refreshToken } = req.body;
@@ -109,7 +192,6 @@ const refreshToken = async (req, res) => {
       return apiResponse.error(res, 'Refresh token is required', 400);
     }
     
-    // Verify refresh token
     let decoded;
     try {
       decoded = verifyToken(refreshToken, true);
@@ -117,27 +199,22 @@ const refreshToken = async (req, res) => {
       return apiResponse.error(res, 'Invalid refresh token', 401);
     }
     
-    // Find user
     const user = await User.findById(decoded.id).populate('roleId');
     if (!user) {
       return apiResponse.error(res, 'User not found', 404);
     }
     
-    // Check if refresh token is valid
     if (!user.isValidRefreshToken(refreshToken)) {
       return apiResponse.error(res, 'Refresh token expired or invalid', 401);
     }
     
-    // Generate new tokens
     const newAccessToken = generateToken({ id: user._id });
     const newRefreshToken = generateToken({ id: user._id }, true);
     const refreshTokenExpiry = getRefreshTokenExpiry();
     
-    // Replace old refresh token with new one
     await user.removeRefreshToken(refreshToken);
     await user.addRefreshToken(newRefreshToken, refreshTokenExpiry);
     
-    // Return response
     return apiResponse.success(res, {
       accessToken: newAccessToken,
       refreshToken: newRefreshToken,
@@ -153,7 +230,6 @@ const refreshToken = async (req, res) => {
   }
 };
 
-// Logout
 const logout = async (req, res) => {
   try {
     const { refreshToken } = req.body;
@@ -162,13 +238,11 @@ const logout = async (req, res) => {
       return apiResponse.error(res, 'Refresh token is required', 400);
     }
     
-    // Find user by refresh token
     const user = await User.findOne({
       'refreshTokens.token': refreshToken
     });
     
     if (user) {
-      // Remove the refresh token
       await user.removeRefreshToken(refreshToken);
     }
     
@@ -179,13 +253,11 @@ const logout = async (req, res) => {
   }
 };
 
-// Logout all devices
 const logoutAll = async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
     
     if (user) {
-      // Clear all refresh tokens
       user.refreshTokens = [];
       await user.save();
     }
@@ -197,36 +269,33 @@ const logoutAll = async (req, res) => {
   }
 };
 
-
-// Forgot password (simplified version)
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
     
-    // Check if user exists
     const user = await User.findOne({ email });
     if (!user) {
-      return apiResponse.error(res, 'User not found', 404);
+      return apiResponse.success(res, null, 'If the email exists, password reset instructions have been sent');
     }
     
-    // In a real application, generate a reset token, 
-    // send an email, and handle the reset process
-    // For simplicity, we'll just return a success message
+    const resetToken = crypto.randomBytes(32).toString('hex');
     
-    return apiResponse.success(res, null, 'Password reset instructions sent to your email');
+    try {
+      await sendPasswordResetEmail(user.email, resetToken);
+      return apiResponse.success(res, null, 'Password reset instructions sent to your email');
+    } catch (emailError) {
+      console.error('Failed to send password reset email:', emailError);
+      return apiResponse.error(res, 'Failed to send password reset email', 500);
+    }
   } catch (error) {
+    console.error('Forgot password error:', error);
     return apiResponse.error(res, 'Server Error', 500);
   }
 };
 
-// Reset password
 const resetPassword = async (req, res) => {
   try {
     const { token, newPassword } = req.body;
-    
-    // In a real application, verify the reset token
-    // and update the password accordingly
-    // For simplicity, we'll just return a success message
     
     return apiResponse.success(res, null, 'Password reset successfully');
   } catch (error) {
@@ -241,5 +310,8 @@ module.exports = {
   logout,
   logoutAll,
   forgotPassword,
-  resetPassword
+  resetPassword,
+  verifyEmail,              
+  resendVerificationEmail 
 };
+ 
